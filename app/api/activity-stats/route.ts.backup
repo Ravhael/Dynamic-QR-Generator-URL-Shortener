@@ -1,0 +1,54 @@
+import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { createPool } from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+  const pool = createPool();
+  
+  try {
+    // Get all required stats in parallel
+    const [totalActivities, userStats, groupStats] = await Promise.all([
+      // Get total activities
+      pool.query(`
+        SELECT COUNT(*) as total 
+        FROM user_activity
+      `),
+      
+      // Get user stats (total users with activity)
+      pool.query(`
+        SELECT COUNT(DISTINCT user_id) as total_users
+        FROM user_activity
+      `),
+      
+      // Get group stats (active groups - groups that have users with activity)
+      pool.query(`
+        SELECT COUNT(DISTINCT g.id) as total_active_groups
+        FROM groups g
+        INNER JOIN users u ON u.group_id = g.id
+        INNER JOIN user_activity ua ON ua.user_id = u.id
+      `)
+    ]);
+
+    console.log('[ACTIVITY STATS API] Stats:', {
+      totalActivities: totalActivities.rows[0].total,
+      totalUsers: userStats.rows[0].total_users,
+      activeGroups: groupStats.rows[0].total_active_groups
+    });
+
+    return NextResponse.json({
+      success: true,
+      stats: {
+        totalActivities: parseInt(totalActivities.rows[0].total),
+        totalUsers: parseInt(userStats.rows[0].total_users),
+        activeGroups: parseInt(groupStats.rows[0].total_active_groups)
+      }
+    });
+
+  } catch (error: any) {
+    console.error('[ACTIVITY STATS API] Error:', error.message);
+    return NextResponse.json(
+      { error: error.message || 'Failed to fetch activity statistics' },
+      { status: 500 }
+    );
+  }
+}

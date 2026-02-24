@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Cookies Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { padding: 10px 20px; margin: 5px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .logout { background: #dc3545; }
+        .logout:hover { background: #c82333; }
+        .test-qr { background: #28a745; }
+        .test-qr:hover { background: #218838; }
+        .info { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 4px; border: 1px solid #dee2e6; }
+        .log { background: #f8f9fa; padding: 10px; margin: 10px 0; border-radius: 4px; font-family: monospace; height: 200px; overflow-y: auto; border: 1px solid #dee2e6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Authentication Test & Debug</h1>
+        
+        <div class="info">
+            <p><strong>Current URL:</strong> <span id="url"></span></p>
+            <p><strong>Auth Cookie:</strong> <span id="cookie"></span></p>
+            <p><strong>All Cookies:</strong> <span id="allCookies"></span></p>
+        </div>
+        
+        <div>
+            <button onclick="clearCookies()">Clear All Cookies (Browser Only)</button>
+            <button class="logout" onclick="serverLogout()">Server Logout (Clear Server Cookie)</button>
+            <button onclick="updateInfo()">Refresh Info</button>
+        </div>
+        
+        <div>
+            <button class="test-qr" onclick="testQRCodes()">Test QR Codes Page</button>
+            <button onclick="testLogin()">Test Login Page</button>
+            <button onclick="testDashboard()">Test Dashboard</button>
+            <button onclick="testRoot()">Test Root (/)</button>
+        </div>
+        
+        <h3>Log Output:</h3>
+        <div id="log" class="log"></div>
+    </div>
+    
+    <script>
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const timestamp = new Date().toISOString();
+            logDiv.innerHTML += `[${timestamp}] ${message}\n`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[AUTH-TEST] ${message}`);
+        }
+        
+        function updateInfo() {
+            document.getElementById('url').textContent = window.location.href;
+            const authCookie = document.cookie.split(';').find(c => c.trim().startsWith('scanly_auth='));
+            document.getElementById('cookie').textContent = authCookie || 'none';
+            document.getElementById('allCookies').textContent = document.cookie || 'none';
+            log(`Info updated - Auth cookie: ${authCookie || 'none'}`);
+        }
+        
+        function clearCookies() {
+            log('Clearing browser cookies...');
+            document.cookie.split(";").forEach(function(c) { 
+                document.cookie = c.replace(/^ +/, "").replace(/=.*/, "=;expires=" + new Date().toUTCString() + ";path=/"); 
+            });
+            log('Browser cookies cleared!');
+            updateInfo();
+        }
+        
+        async function serverLogout() {
+            try {
+                log('Calling server logout API...');
+                const response = await fetch('/api/logout', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                const result = await response.json();
+                log(`Server logout response: ${JSON.stringify(result)}`);
+                updateInfo();
+            } catch (error) {
+                log(`Server logout error: ${error.message}`);
+            }
+        }
+        
+        function testQRCodes() {
+            log('Testing QR Codes page...');
+            window.location.href = '/qr-codes';
+        }
+        
+        function testLogin() {
+            log('Testing Login page...');
+            window.location.href = '/login';
+        }
+        
+        function testDashboard() {
+            log('Testing Dashboard page...');
+            window.location.href = '/dashboard';
+        }
+        
+        function testRoot() {
+            log('Testing Root page...');
+            window.location.href = '/';
+        }
+        
+        // Initialize
+        log('Auth test page loaded');
+        updateInfo();
+    </script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+{
+  // Standalone TS config for clean type-checks (no Next-generated types)
+  "compilerOptions": {
+    "target": "ES2017",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "node",
+    "jsx": "preserve",
+    "strict": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "incremental": false,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "baseUrl": ".",
+    "paths": { "@/*": ["./*"] },
+    "types": ["node", "react", "react-dom"]
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "components/**/*.ts",
+    "components/**/*.tsx",
+    "hooks/**/*.ts",
+    "hooks/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "utils/**/*.ts",
+    "utils/**/*.tsx",
+    "types/**/*.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+    ".next/**",
+    "**/.next/**",
+    ".next/types",
+    ".next/types/**/*.ts",
+    // Exclude Next's env/types to prevent pulling in .next/types route checks
+    "next-env.d.ts",
+    // Exclude legacy/backup/broken files
+    "**/*-backup.ts",
+    "**/*-broken.ts",
+    "**/*.old.tsx",
+    "**/*.old.ts",
+    "components/contexts/AuthContext.old.tsx",
+    "app/api/qr-codes/route-backup.ts",
+    "app/api/scan-events/route-broken.ts",
+    "app/api/users/me/stats/route-broken.ts",
+    // Exclude optional integrations during isolated checks
+    "lib/auth-next.ts"
+  ]
+}

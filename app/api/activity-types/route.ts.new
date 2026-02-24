@@ -1,0 +1,348 @@
+import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { getToken } from "next-auth/jwt";
+import { PrismaClient } from '@prisma/client';
+
+// Singleton pattern untuk PrismaClient
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+const prisma = globalForPrisma.prisma || new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+// Prevent response caching
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+export async function GET(request: NextRequest) {
+  try {
+    console.warn("[ACTIVITY TYPES API] Starting request processing");
+
+    // Auth check with more robust token validation
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token?.role) {
+      console.warn('[ACTIVITY TYPES API] Auth failed:', { 
+        token: token ? 'exists' : 'missing',
+        role: token?.role 
+      });
+      
+      return NextResponse.json({ 
+        success: false,
+        message: 'Authentication required',
+        error: token ? 'Insufficient permissions' : 'No authentication token'
+      }, { 
+        status: token ? 403 : 401,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    // Role check with proper roles
+    if (!['ADMIN', 'MANAGER', 'USER'].includes(token.role.toUpperCase())) {
+      console.warn('[ACTIVITY TYPES API] Invalid role access attempt:', token.role);
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized',
+        error: 'Insufficient permissions'
+      }, { 
+        status: 403,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    console.warn("[ACTIVITY TYPES API] Fetching activity types from database");
+
+    // Fetch activity types with Prisma
+    const activityTypes = await prisma.activity_types.findMany({
+      where: {
+        is_active: true,
+        deleted_at: null
+      },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        description: true,
+        category: true,
+        icon: true,
+        color: true,
+        is_sensitive: true,
+        requires_approval: true,
+        created_at: true,
+        is_active: true
+      },
+      orderBy: [
+        { category: 'asc' },
+        { name: 'asc' }
+      ]
+    });
+    
+    console.warn(`[ACTIVITY TYPES API] Found ${activityTypes.length} activity types`);
+
+    // Group by category for better organization
+    const categorizedTypes = activityTypes.reduce((acc: Record<string, any[]>, type) => {
+      const category = type.category || 'Uncategorized';
+      if (!acc[category]) {
+        acc[category] = [];
+      }
+      acc[category].push(type);
+      return acc;
+    }, {});
+
+    // Return success response with proper metadata
+    return NextResponse.json({
+      success: true,
+      data: {
+        activity_types: activityTypes,
+        categorized: categorizedTypes,
+        total: activityTypes.length,
+        categories: Object.keys(categorizedTypes)
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        user: token.email
+      },
+      message: 'Activity types retrieved successfully'
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Content-Type': 'application/json'
+      }
+    });
+
+  } catch (error: unknown) {
+    // Detailed error logging
+    console.error('[ACTIVITY TYPES API] Error details:', {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : 'Unknown error occurred',
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString()
+    });
+
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to fetch activity types',
+      error: error instanceof Error ? error.message : 'Unknown error occurred'
+    }, { 
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Content-Type': 'application/json'
+      }
+    });
+  } finally {
+    // Only disconnect in development to prevent connection churn in production
+    if (process.env.NODE_ENV !== 'production') {
+      await prisma.$disconnect().catch(console.error);
+    }
+  }
+}
+
+// POST: Create new activity type
+export async function POST(request: NextRequest) {
+  try {
+    // Auth check
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token?.role) {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Authentication required'
+      }, { status: 401 });
+    }
+
+    // Only admin can create activity types
+    if (token.role.toUpperCase() !== 'ADMIN') {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized - Admin access required'
+      }, { status: 403 });
+    }
+
+    const body = await request.json();
+
+    // Validate required fields
+    if (!body.name || !body.code) {
+      return NextResponse.json({
+        success: false,
+        message: 'Name and code are required'
+      }, { status: 400 });
+    }
+
+    // Create activity type
+    const activityType = await prisma.activity_types.create({
+      data: {
+        code: body.code,
+        name: body.name,
+        description: body.description,
+        category: body.category || 'general',
+        icon: body.icon,
+        color: body.color || '#3B82F6',
+        is_sensitive: body.is_sensitive || false,
+        requires_approval: body.requires_approval || false,
+        is_active: true,
+        created_by: token.sub,  // User ID from token
+        created_at: new Date()
+      }
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: activityType,
+      message: 'Activity type created successfully'
+    });
+
+  } catch (error: unknown) {
+    console.error('[ACTIVITY TYPES API] Create Error:', error);
+    
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to create activity type',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+// PUT: Update activity type
+export async function PUT(request: NextRequest) {
+  try {
+    // Auth check
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token?.role) {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Authentication required'
+      }, { status: 401 });
+    }
+
+    // Only admin can update activity types
+    if (token.role.toUpperCase() !== 'ADMIN') {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized - Admin access required'
+      }, { status: 403 });
+    }
+
+    const body = await request.json();
+
+    if (!body.id) {
+      return NextResponse.json({
+        success: false,
+        message: 'Activity type ID is required'
+      }, { status: 400 });
+    }
+
+    // Update activity type
+    const activityType = await prisma.activity_types.update({
+      where: { id: body.id },
+      data: {
+        code: body.code,
+        name: body.name,
+        description: body.description,
+        category: body.category,
+        icon: body.icon,
+        color: body.color,
+        is_sensitive: body.is_sensitive,
+        requires_approval: body.requires_approval,
+        is_active: body.is_active,
+        updated_by: token.sub,  // User ID from token
+        updated_at: new Date()
+      }
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: activityType,
+      message: 'Activity type updated successfully'
+    });
+
+  } catch (error: unknown) {
+    console.error('[ACTIVITY TYPES API] Update Error:', error);
+    
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to update activity type',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}
+
+// DELETE: Delete/deactivate activity type
+export async function DELETE(request: NextRequest) {
+  try {
+    // Auth check
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token?.role) {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Authentication required'
+      }, { status: 401 });
+    }
+
+    // Only admin can delete activity types
+    if (token.role.toUpperCase() !== 'ADMIN') {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized - Admin access required'
+      }, { status: 403 });
+    }
+
+    const body = await request.json();
+
+    if (!body.id) {
+      return NextResponse.json({
+        success: false,
+        message: 'Activity type ID is required'
+      }, { status: 400 });
+    }
+
+    // Soft delete by updating is_active and deleted_at
+    const activityType = await prisma.activity_types.update({
+      where: { id: body.id },
+      data: {
+        is_active: false,
+        deleted_at: new Date(),
+        updated_by: token.sub,  // User ID from token
+        updated_at: new Date()
+      }
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: activityType,
+      message: 'Activity type deleted successfully'
+    });
+
+  } catch (error: unknown) {
+    console.error('[ACTIVITY TYPES API] Delete Error:', error);
+    
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to delete activity type',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Role Permissions API</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <h1>Testing Role Permissions API</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testAPI() {
+            try {
+                console.log('🧪 Testing role-permissions API...');
+                
+                const response = await fetch('/api/admin/role-permissions');
+                const data = await response.json();
+                
+                const resultsDiv = document.getElementById('results');
+                
+                if (data.success && Array.isArray(data.data)) {
+                    resultsDiv.innerHTML = `
+                        <h2>✅ API Test Successful!</h2>
+                        <p><strong>Status:</strong> ${response.status}</p>
+                        <p><strong>Success:</strong> ${data.success}</p>
+                        <p><strong>Data Type:</strong> ${Array.isArray(data.data) ? 'Array' : typeof data.data}</p>
+                        <p><strong>Records Count:</strong> ${data.data.length}</p>
+                        
+                        <h3>Sample Permissions (First 5):</h3>
+                        <pre>${JSON.stringify(data.data.slice(0, 5), null, 2)}</pre>
+                    `;
+                    
+                    console.log('✅ API working correctly!');
+                    console.log('Data format is correct:', Array.isArray(data.data));
+                    console.log('Sample data:', data.data.slice(0, 3));
+                } else {
+                    resultsDiv.innerHTML = `
+                        <h2>❌ API Test Failed</h2>
+                        <p>Response: ${JSON.stringify(data, null, 2)}</p>
+                    `;
+                }
+            } catch (error) {
+                document.getElementById('results').innerHTML = `
+                    <h2>❌ Error</h2>
+                    <p>${error.message}</p>
+                `;
+            }
+        }
+        
+        // Run test when page loads
+        window.onload = testAPI;
+    </script>
+</body>
+</html>

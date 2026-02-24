@@ -1,0 +1,146 @@
+import { NextAuthOptions } from "next-auth"
+import CredentialsProvider from "next-auth/providers/credentials"
+import bcrypt from "bcryptjs"
+import { db as prisma } from "./prisma"  // Use the shared Prisma instance
+
+// Extend the built-in session types
+declare module "next-auth" {
+  interface Session {
+    user: {
+      id: string
+      name: string
+      email: string
+      role: string
+      groupId?: number
+      is_active: boolean
+    }
+  }
+  interface User {
+    role: string
+    groupId?: number
+    is_active: boolean
+  }
+}
+
+export const authOptions: NextAuthOptions = {
+  debug: process.env.NODE_ENV === 'development',
+  providers: [
+    CredentialsProvider({
+      name: "Credentials",
+      credentials: {
+        email: { label: "Email", type: "email" },
+        password: { label: "Password", type: "password" },
+        name: { label: "Name", type: "text" },
+        isRegistering: { label: "Is Registering", type: "text" }
+      },
+      async authorize(credentials) {
+        if (!credentials?.email || !credentials?.password) {
+          throw new Error("Missing required fields")
+        }
+
+        // Check if this is a registration request
+        if (credentials.isRegistering === 'true') {
+          // Check if user already exists
+          const existingUser = await prisma.user.findUnique({
+            where: { email: credentials.email }
+          })
+
+          if (existingUser) {
+            throw new Error("Email already registered")
+          }
+
+          // Create new user
+          const hashedPassword = await bcrypt.hash(credentials.password, 12)
+          const user = await prisma.user.create({
+            data: {
+              email: credentials.email,
+              name: credentials.name as string,
+              password: hashedPassword,
+              role: 'USER',
+              is_active: true
+            }
+          })
+
+          return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            is_active: user.is_active
+          }
+        }
+
+        // Login flow
+        const user = await prisma.user.findUnique({
+          where: { email: credentials.email }
+        })
+
+        if (!user) {
+          throw new Error("No user found")
+        }
+
+        if (!user.password) {
+          throw new Error("Please log in with the appropriate provider")
+        }
+
+        const isValid = await bcrypt.compare(credentials.password, user.password)
+
+        if (!isValid) {
+          throw new Error("Invalid credentials")
+        }
+
+        // Update last login
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { last_login: new Date() }
+        })
+
+        return {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          avatar: user.avatar,
+          groupId: user.group_id,
+          is_active: user.is_active
+        }
+      }
+    })
+  ],
+  callbacks: {
+    async jwt({ token, user }) {
+      if (user) {
+        token.role = user.role
+        token.groupId = user.groupId
+        token.is_active = user.is_active
+        token.sub = user.id
+      }
+      return token
+    },
+    async session({ session, token }) {
+      if (token && session.user) {
+        session.user.role = token.role as string
+        session.user.groupId = token.groupId as number
+        session.user.is_active = token.is_active as boolean
+        session.user.id = token.sub as string
+      }
+      return session
+    },
+    async redirect({ url, baseUrl }) {
+      // Allows relative callback URLs
+      if (url.startsWith("/")) return `${baseUrl}${url}`
+      // Allows callback URLs on the same origin
+      else if (new URL(url).origin === baseUrl) return url
+      return baseUrl
+    }
+  },
+  pages: {
+    signIn: '/login',
+    error: '/login',
+  },
+  session: {
+    strategy: "jwt",
+    maxAge: 30 * 24 * 60 * 60, // 30 days
+  },
+  secret: process.env.NEXTAUTH_SECRET || "8de0f0296ac805dee48992a98a5b38a48405b85c34801617d8853719daa5531e"
+}

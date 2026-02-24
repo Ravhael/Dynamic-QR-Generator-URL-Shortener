@@ -1,0 +1,810 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  userId            String    @map("user_id") @db.Uuid
+  type              String    @db.VarChar(255)
+  provider          String    @db.VarChar(255)
+  providerAccountId String    @map("provider_account_id") @db.VarChar(255)
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?   @db.VarChar(255)
+  scope             String?   @db.VarChar(255)
+  id_token          String?
+  session_state     String?   @db.VarChar(255)
+  created_at        DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime? @default(now()) @db.Timestamptz(6)
+  user              users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  sessionToken String    @unique @map("session_token") @db.VarChar(255)
+  userId       String    @map("user_id") @db.Uuid
+  expires      DateTime  @db.Timestamptz(6)
+  created_at   DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at   DateTime? @default(now()) @db.Timestamptz(6)
+  user         users     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String    @db.VarChar(255)
+  token      String    @db.VarChar(255)
+  expires    DateTime  @db.Timestamptz(6)
+  created_at DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at DateTime? @default(now()) @db.Timestamptz(6)
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model activity_types {
+  id                                     String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  code                                   String          @unique @db.VarChar(50)
+  name                                   String          @db.VarChar(255)
+  description                            String?
+  category                               String?         @default("general") @db.VarChar(100)
+  icon                                   String?         @db.VarChar(100)
+  color                                  String?         @default("#3B82F6") @db.VarChar(7)
+  is_sensitive                           Boolean?        @default(false)
+  requires_approval                      Boolean?        @default(false)
+  retention_days                         Int?            @default(365)
+  created_at                             DateTime?       @default(now()) @db.Timestamp(6)
+  updated_at                             DateTime?       @default(now()) @db.Timestamp(6)
+  is_active                              Boolean?        @default(true)
+  created_by                             String?         @db.Uuid
+  updated_by                             String?         @db.Uuid
+  priority                               Int?            @default(100)
+  weight                                 Int?            @default(0)
+  users_activity_types_created_byTousers users?          @relation("activity_types_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  users_activity_types_updated_byTousers users?          @relation("activity_types_updated_byTousers", fields: [updated_by], references: [id], onUpdate: NoAction)
+  user_activity                          user_activity[]
+
+  @@index([category], map: "idx_activity_types_category")
+  @@index([code], map: "idx_activity_types_code")
+  @@index([priority, code], map: "idx_activity_types_priority_code")
+}
+
+model click_events {
+  id                                   Int                   @id @default(autoincrement())
+  url_id                               String?               @db.Uuid
+  user_id                              String?               @db.Uuid
+  clicked_at                           DateTime?             @default(now()) @db.Timestamptz(6)
+  created_by                           String?               @db.Uuid
+  updated_by                           String?               @db.Uuid
+  created_at                           DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at                           DateTime?             @default(now()) @db.Timestamptz(6)
+  users_click_events_created_byTousers users?                @relation("click_events_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_click_events_updated_byTousers users?                @relation("click_events_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  short_urls                           short_urls?           @relation(fields: [url_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_click_events_user_idTousers    users?                @relation("click_events_user_idTousers", fields: [user_id], references: [id], onUpdate: NoAction)
+  url_click_analytics                  url_click_analytics[]
+
+  @@index([clicked_at], map: "idx_click_events_clicked_at")
+  @@index([url_id], map: "idx_click_events_url_id")
+  @@index([user_id], map: "idx_click_events_user_id")
+  // Composite index to accelerate per-user time-ordered lookups & retention cleanup
+  @@index([user_id, clicked_at], map: "idx_click_events_user_clicked_at")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model click_events_backup {
+  id          Int?
+  url_id      String?   @db.Uuid
+  user_id     String?   @db.Uuid
+  clicked_at  DateTime? @db.Timestamptz(6)
+  ip_address  String?   @db.Inet
+  user_agent  String?
+  device_type String?   @db.VarChar(50)
+  browser     String?   @db.VarChar(100)
+  os          String?   @db.VarChar(100)
+  country     String?   @db.VarChar(100)
+  city        String?   @db.VarChar(100)
+  latitude    Decimal?  @db.Decimal(10, 8)
+  longitude   Decimal?  @db.Decimal(11, 8)
+  referrer    String?
+  created_at  DateTime? @db.Timestamptz(6)
+  updated_at  DateTime? @db.Timestamptz(6)
+  created_by  String?   @db.Uuid
+  updated_by  String?   @db.Uuid
+
+  @@ignore
+}
+
+model groups {
+  id                             Int       @id @default(autoincrement())
+  name                           String    @db.VarChar(255)
+  description                    String?
+  created_at                     DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at                     DateTime? @default(now()) @db.Timestamptz(6)
+  created_by                     String?   @db.Uuid
+  parent_id                      Int?
+  updated_by                     String?   @db.Uuid
+  member_count                   Int?      @default(0)
+  users_groups_created_byTousers users?    @relation("groups_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  groups                         groups?   @relation("groupsTogroups", fields: [parent_id], references: [id], onUpdate: NoAction)
+  other_groups                   groups[]  @relation("groupsTogroups")
+  users_groups_updated_byTousers users?    @relation("groups_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_users_group_idTogroups   users[]   @relation("users_group_idTogroups")
+}
+
+model menu_items {
+  id                                 Int                     @id @default(autoincrement())
+  menu_id                            String                  @unique @db.VarChar(100)
+  name                               String                  @db.VarChar(100)
+  path                               String?                 @db.VarChar(200)
+  icon                               String?                 @db.VarChar(50)
+  parent_id                          String?                 @db.VarChar(100)
+  sort_order                         Int?                    @default(0)
+  is_active                          Boolean?                @default(true)
+  is_group                           Boolean?                @default(false)
+  created_at                         DateTime?               @default(now()) @db.Timestamp(6)
+  updated_at                         DateTime?               @default(now()) @db.Timestamp(6)
+  created_by                         String?                 @db.Uuid
+  updated_by                         String?                 @db.Uuid
+  users_menu_items_created_byTousers users?                  @relation("menu_items_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_menu_items_updated_byTousers users?                  @relation("menu_items_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  menu_permissions                   menu_permissions[]
+  menu_role_permissions              menu_role_permissions[]
+}
+
+model menu_permissions {
+  id                                       Int        @id @default(autoincrement())
+  menu_item_id                             Int
+  permission_name                          String     @db.VarChar(100)
+  description                              String?
+  is_active                                Boolean?   @default(true)
+  created_at                               DateTime?  @default(now()) @db.Timestamp(6)
+  updated_at                               DateTime?  @default(now()) @db.Timestamp(6)
+  created_by                               String?    @db.Uuid
+  updated_by                               String?    @db.Uuid
+  users_menu_permissions_created_byTousers users?     @relation("menu_permissions_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  menu_items                               menu_items @relation(fields: [menu_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_menu_permissions_updated_byTousers users?     @relation("menu_permissions_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([menu_item_id, permission_name])
+}
+
+model menu_role_permissions {
+  id                                            Int        @id @default(autoincrement())
+  role_name                                     String     @db.VarChar(50)
+  menu_item_id                                  Int
+  can_view                                      Boolean?   @default(false)
+  can_create                                    Boolean?   @default(false)
+  can_edit                                      Boolean?   @default(false)
+  can_delete                                    Boolean?   @default(false)
+  can_export                                    Boolean?   @default(false)
+  is_active                                     Boolean?   @default(true)
+  created_at                                    DateTime?  @default(now()) @db.Timestamp(6)
+  updated_at                                    DateTime?  @default(now()) @db.Timestamp(6)
+  role_id                                       String     @db.Uuid
+  created_by                                    String?    @db.Uuid
+  updated_by                                    String?    @db.Uuid
+  is_accessible                                 Boolean?   @default(true)
+  has_permission                                Boolean?   @default(true)
+  roles                                         roles      @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_menu_role_permissions_role_id")
+  users_menu_role_permissions_created_byTousers users?     @relation("menu_role_permissions_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  menu_items                                    menu_items @relation(fields: [menu_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_menu_role_permissions_updated_byTousers users?     @relation("menu_role_permissions_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@unique([role_name, menu_item_id])
+}
+
+model notification_recipients {
+  id                                              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  notification_id                                 String        @db.Uuid
+  user_id                                         String        @db.Uuid
+  is_read                                         Boolean?      @default(false)
+  is_dismissed                                    Boolean?      @default(false)
+  is_clicked                                      Boolean?      @default(false)
+  read_at                                         DateTime?     @db.Timestamp(6)
+  dismissed_at                                    DateTime?     @db.Timestamp(6)
+  clicked_at                                      DateTime?     @db.Timestamp(6)
+  created_at                                      DateTime?     @default(now()) @db.Timestamp(6)
+  created_by                                      String?       @db.Uuid
+  updated_by                                      String?       @db.Uuid
+  updated_at                                      DateTime?     @default(now()) @db.Timestamp(6)
+  users_notification_recipients_created_byTousers users?        @relation("notification_recipients_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notifications                                   notifications @relation(fields: [notification_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_notification_recipients_updated_byTousers users?        @relation("notification_recipients_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_notification_recipients_user_idTousers    users         @relation("notification_recipients_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([notification_id, user_id])
+  @@index([notification_id], map: "idx_notification_recipients_notification_id")
+  @@index([user_id], map: "idx_notification_recipients_user_id")
+}
+
+model notification_types {
+  id                                         String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                                       String          @unique @db.VarChar(50)
+  display_name                               String          @db.VarChar(100)
+  description                                String?
+  icon                                       String?         @db.VarChar(50)
+  color                                      String?         @db.VarChar(7)
+  is_active                                  Boolean?        @default(true)
+  created_by                                 String?         @db.Uuid
+  updated_by                                 String?         @db.Uuid
+  created_at                                 DateTime?       @default(now()) @db.Timestamp(6)
+  updated_at                                 DateTime?       @default(now()) @db.Timestamp(6)
+  users_notification_types_created_byTousers users?          @relation("notification_types_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_notification_types_updated_byTousers users?          @relation("notification_types_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notifications                              notifications[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model notifications {
+  id                                    String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  title                                 String                    @db.VarChar(255)
+  message                               String
+  type                                  String?                   @default("info") @db.VarChar(50)
+  priority                              String?                   @default("normal") @db.VarChar(20)
+  category                              String?                   @default("general") @db.VarChar(100)
+  icon                                  String?                   @db.VarChar(100)
+  color                                 String?                   @default("#3B82F6") @db.VarChar(7)
+  action_url                            String?
+  action_label                          String?                   @db.VarChar(100)
+  image_url                             String?
+  metadata                              Json?                     @default("{}")
+  expires_at                            DateTime?                 @db.Timestamp(6)
+  created_at                            DateTime?                 @default(now()) @db.Timestamp(6)
+  updated_at                            DateTime?                 @default(now()) @db.Timestamp(6)
+  created_by                            String?                   @db.Uuid
+  updated_by                            String?                   @db.Uuid
+  type_id                               String?                   @db.Uuid
+  notification_recipients               notification_recipients[]
+  users_notifications_created_byTousers users?                    @relation("notifications_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  notification_types                    notification_types?       @relation(fields: [type_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_notifications_updated_byTousers users?                    @relation("notifications_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([created_at], map: "idx_notifications_created_at")
+  @@index([expires_at], map: "idx_notifications_expires_at")
+  @@index([priority], map: "idx_notifications_priority")
+}
+
+model qr_categories {
+  id                                    String         @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                                  String         @db.VarChar(255)
+  description                           String?
+  color                                 String?        @db.VarChar(7)
+  is_default                            Boolean?       @default(false)
+  user_id                               String?        @db.Uuid
+  created_at                            DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at                            DateTime?      @default(now()) @db.Timestamptz(6)
+  created_by                            String?        @db.Uuid
+  updated_by                            String?        @db.Uuid
+  users_qr_categories_created_byTousers users?         @relation("qr_categories_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_qr_categories_updated_byTousers users?         @relation("qr_categories_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_qr_categories_user_idTousers    users?         @relation("qr_categories_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  qr_codes                              qr_codes[]
+  qr_migration                          qr_migration[]
+
+  @@index([user_id], map: "idx_qr_categories_user_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model qr_codes {
+  id                               String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                             String              @db.VarChar(255)
+  type                             String              @db.VarChar(20)
+  content                          String
+  is_dynamic                       Boolean?            @default(false)
+  tags                             Json?               @default("[]")
+  scans                            Int?                @default(0)
+  is_active                        Boolean?            @default(true)
+  expires_at                       DateTime?           @db.Timestamptz(6)
+  max_scans                        Int?
+  qr_code_data                     String
+  customization                    Json?               @default("{}")
+  user_id                          String              @db.Uuid
+  category_id                      String?             @db.Uuid
+  created_at                       DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at                       DateTime?           @default(now()) @db.Timestamptz(6)
+  created_by                       String?             @db.Uuid
+  updated_by                       String?             @db.Uuid
+  qr_categories                    qr_categories?      @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  users_qr_codes_created_byTousers users?              @relation("qr_codes_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_qr_codes_updated_byTousers users?              @relation("qr_codes_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_qr_codes_user_idTousers    users               @relation("qr_codes_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  qr_scan_analytics                qr_scan_analytics[]
+  scan_events                      scan_events[]
+
+  @@index([category_id], map: "idx_qr_codes_category_id")
+  @@index([created_by], map: "idx_qr_codes_created_by")
+  @@index([is_active], map: "idx_qr_codes_is_active")
+  @@index([type], map: "idx_qr_codes_type")
+  @@index([user_id], map: "idx_qr_codes_user_id")
+}
+
+model qr_migration {
+  id                String              @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  description       String?
+  name              String              @db.VarChar(255)
+  category_id       String?             @db.Uuid
+  user_id           String              @db.Uuid
+  key               String              @db.VarChar(255)
+  redirect_url      String
+  url_update        String?
+  qr_image          String?
+  status            String?             @default("active") @db.VarChar(50)
+  scans             Int?                @default(0)
+  created_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime?           @default(now()) @db.Timestamptz(6)
+  qr_categories     qr_categories?      @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  users             users               @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  qr_scan_analytics qr_scan_analytics[]
+  scan_events       scan_events[]
+
+  @@unique([user_id, key], map: "uq_qr_migration_user_key")
+  @@index([category_id], map: "idx_qr_migration_category_id")
+  @@index([key], map: "idx_qr_migration_key")
+  @@index([status], map: "idx_qr_migration_status")
+  @@index([user_id], map: "idx_qr_migration_user_id")
+}
+
+model qr_scan_analytics {
+  id                                        String        @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  qr_code_id                                String        @db.Uuid
+  scanned_at                                DateTime?     @default(now()) @db.Timestamptz(6)
+  ip_address                                String?       @db.Inet
+  user_agent                                String?
+  country                                   String?       @db.VarChar(100)
+  city                                      String?       @db.VarChar(100)
+  region                                    String?       @db.VarChar(100)
+  timezone                                  String?       @db.VarChar(50)
+  latitude                                  Decimal?      @db.Decimal(10, 8)
+  longitude                                 Decimal?      @db.Decimal(11, 8)
+  isp                                       String?       @db.VarChar(255)
+  device_type                               String?       @db.VarChar(50)
+  device_brand                              String?       @db.VarChar(100)
+  device_model                              String?       @db.VarChar(100)
+  operating_system                          String?       @db.VarChar(100)
+  browser                                   String?       @db.VarChar(100)
+  screen_resolution                         String?       @db.VarChar(20)
+  language                                  String?       @db.VarChar(10)
+  session_id                                String?       @db.VarChar(255)
+  scan_event_id                             Int?
+  created_by                                String?       @db.Uuid
+  updated_by                                String?       @db.Uuid
+  created_at                                DateTime?     @default(now()) @db.Timestamptz(6)
+  updated_at                                DateTime?     @default(now()) @db.Timestamptz(6)
+  user_id                                   String?       @db.Uuid
+  browser_version                           String?       @db.VarChar(100)
+  viewport_size                             String?       @db.VarChar(50)
+  color_depth                               Int?
+  languages                                 String[]
+  time_zone                                 String?       @db.VarChar(100)
+  referrer_domain                           String?       @db.VarChar(255)
+  utm_source                                String?       @db.VarChar(100)
+  utm_medium                                String?       @db.VarChar(100)
+  utm_campaign                              String?       @db.VarChar(100)
+  utm_term                                  String?       @db.VarChar(100)
+  utm_content                               String?       @db.VarChar(100)
+  is_bot                                    Boolean?      @default(false)
+  is_mobile                                 Boolean?      @default(false)
+  is_first_visit                            Boolean?      @default(true)
+  visit_duration                            Int?
+  connection_type                           String?       @db.VarChar(50)
+  page_load_time                            Int?
+  scroll_depth                              Int?
+  click_x                                   Int?
+  click_y                                   Int?
+  os                                        String?       @db.VarChar(100)
+  referrer                                  String?
+  migration_qr_id                           String?       @db.Uuid
+  qr_migration                              qr_migration? @relation(fields: [migration_qr_id], references: [id], onUpdate: NoAction, map: "fk_qr_scan_analytics_migration_qr_id")
+  users_qr_scan_analytics_created_byTousers users?        @relation("qr_scan_analytics_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  qr_codes                                  qr_codes      @relation(fields: [qr_code_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  scan_events                               scan_events?  @relation(fields: [scan_event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_qr_scan_analytics_updated_byTousers users?        @relation("qr_scan_analytics_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_qr_scan_analytics_user_idTousers    users?        @relation("qr_scan_analytics_user_idTousers", fields: [user_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([country], map: "idx_qr_scan_analytics_country")
+  @@index([country, device_type], map: "idx_qr_scan_analytics_country_device")
+  @@index([device_type], map: "idx_qr_scan_analytics_device_type")
+  @@index([migration_qr_id], map: "idx_qr_scan_analytics_migration_qr_id")
+  @@index([qr_code_id], map: "idx_qr_scan_analytics_qr_code_id")
+  @@index([qr_code_id, scanned_at(sort: Desc)], map: "idx_qr_scan_analytics_qr_code_id_scanned_at")
+  @@index([scan_event_id], map: "idx_qr_scan_analytics_scan_event_id")
+  @@index([scanned_at], map: "idx_qr_scan_analytics_scanned_at")
+  @@index([utm_source], map: "idx_qr_scan_analytics_utm_source")
+}
+
+model resource_types {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique @db.VarChar(100)
+  description String?
+  created_at  DateTime? @default(now()) @db.Timestamp(6)
+  updated_at  DateTime? @default(now()) @db.Timestamp(6)
+}
+
+model role_permissions {
+  id                                       Int       @id @default(autoincrement())
+  role                                     String    @db.VarChar(50)
+  resource_type                            String    @db.VarChar(100)
+  permission_type                          String    @db.VarChar(50)
+  scope                                    String?   @default("all") @db.VarChar(100)
+  description                              String?
+  created_at                               DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                               DateTime? @default(now()) @db.Timestamp(6)
+  role_id                                  String?   @db.Uuid
+  created_by                               String?   @db.Uuid
+  updated_by                               String?   @db.Uuid
+  users_role_permissions_created_byTousers users?    @relation("role_permissions_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  roles                                    roles?    @relation(fields: [role_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_role_permissions_updated_byTousers users?    @relation("role_permissions_updated_byTousers", fields: [updated_by], references: [id], onUpdate: NoAction)
+
+  @@unique([role, resource_type, permission_type])
+}
+
+model roles {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                  String                  @unique @db.VarChar(50)
+  display_name          String                  @db.VarChar(100)
+  description           String?
+  is_active             Boolean?                @default(true)
+  created_at            DateTime?               @default(now()) @db.Timestamptz(6)
+  updated_at            DateTime?               @default(now()) @db.Timestamptz(6)
+  menu_role_permissions menu_role_permissions[]
+  role_permissions      role_permissions[]
+  users                 users[]
+}
+
+model scan_events {
+  id                                  Int                 @id(map: "scan_events_new_pkey") @default(autoincrement())
+  qr_code_id                          String              @db.Uuid
+  user_id                             String?             @db.Uuid
+  scanned_at                          DateTime?           @default(now()) @db.Timestamptz(6)
+  created_by                          String?             @db.Uuid
+  updated_by                          String?             @db.Uuid
+  created_at                          DateTime?           @default(now()) @db.Timestamptz(6)
+  updated_at                          DateTime?           @default(now()) @db.Timestamptz(6)
+  migration_qr_id                     String?             @db.Uuid
+  qr_scan_analytics                   qr_scan_analytics[]
+  qr_migration                        qr_migration?       @relation(fields: [migration_qr_id], references: [id], onUpdate: NoAction, map: "fk_scan_events_migration_qr_id")
+  users_scan_events_created_byTousers users?              @relation("scan_events_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction, map: "scan_events_new_created_by_fkey")
+  qr_codes                            qr_codes            @relation(fields: [qr_code_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "scan_events_new_qr_code_id_fkey")
+  users_scan_events_updated_byTousers users?              @relation("scan_events_updated_byTousers", fields: [updated_by], references: [id], onUpdate: NoAction, map: "scan_events_new_updated_by_fkey")
+  users_scan_events_user_idTousers    users?              @relation("scan_events_user_idTousers", fields: [user_id], references: [id], onUpdate: NoAction, map: "scan_events_new_user_id_fkey")
+
+  @@index([migration_qr_id], map: "idx_scan_events_migration_qr_id")
+  @@index([qr_code_id], map: "idx_scan_events_qr_code_id")
+  @@index([scanned_at], map: "idx_scan_events_scanned_at")
+  @@index([user_id], map: "idx_scan_events_user_id")
+  // Composite index to speed up queries filtering by user then ordering or filtering by scanned_at
+  @@index([user_id, scanned_at], map: "idx_scan_events_user_scanned_at")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model scan_events_backup_1758020004997 {
+  id              Int?
+  qr_code_id      String?   @db.Uuid
+  user_id         String?   @db.Uuid
+  scanned_at      DateTime? @db.Timestamptz(6)
+  ip_address      String?   @db.Inet
+  user_agent      String?
+  device_type     String?   @db.VarChar(50)
+  browser         String?   @db.VarChar(100)
+  os              String?   @db.VarChar(100)
+  country         String?   @db.VarChar(100)
+  city            String?   @db.VarChar(100)
+  latitude        Decimal?  @db.Decimal(10, 8)
+  longitude       Decimal?  @db.Decimal(11, 8)
+  referrer        String?
+  created_at      DateTime? @db.Timestamptz(6)
+  updated_at      DateTime? @db.Timestamptz(6)
+  source_table    String?   @db.VarChar(20)
+  migration_qr_id String?   @db.Uuid
+  created_by      String?   @db.Uuid
+  updated_by      String?   @db.Uuid
+
+  @@ignore
+}
+
+model short_urls {
+  id                                 String                @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  original_url                       String
+  short_code                         String                @unique @db.VarChar(50)
+  short_url                          String                @db.VarChar(255)
+  title                              String                @db.VarChar(255)
+  description                        String?
+  tags                               Json?                 @default("[]")
+  clicks                             Int?                  @default(0)
+  is_active                          Boolean?              @default(true)
+  tracking_enabled                   Boolean?              @default(true)
+  expires_at                         DateTime?             @db.Timestamptz(6)
+  max_clicks                         Int?
+  custom_domain                      String?               @db.VarChar(255)
+  user_id                            String                @db.Uuid
+  category_id                        String?               @db.Uuid
+  created_at                         DateTime?             @default(now()) @db.Timestamptz(6)
+  updated_at                         DateTime?             @default(now()) @db.Timestamptz(6)
+  created_by                         String?               @db.Uuid
+  updated_by                         String?               @db.Uuid
+  click_events                       click_events[]
+  url_categories                     url_categories?       @relation(fields: [category_id], references: [id], onUpdate: NoAction)
+  users_short_urls_created_byTousers users?                @relation("short_urls_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_short_urls_updated_byTousers users?                @relation("short_urls_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_short_urls_user_idTousers    users                 @relation("short_urls_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  url_click_analytics                url_click_analytics[]
+
+  @@index([category_id], map: "idx_short_urls_category_id")
+  @@index([is_active], map: "idx_short_urls_is_active")
+  @@index([short_code], map: "idx_short_urls_short_code")
+  @@index([user_id], map: "idx_short_urls_user_id")
+}
+
+model system_settings {
+  id                                      Int       @id @default(autoincrement())
+  category                                String    @db.VarChar(100)
+  setting_key                             String    @db.VarChar(100)
+  setting_value                           String?
+  data_type                               String?   @default("string") @db.VarChar(20)
+  description                             String?
+  is_active                               Boolean?  @default(true)
+  created_at                              DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                              DateTime? @default(now()) @db.Timestamp(6)
+  created_by                              String?   @db.Uuid
+  updated_by                              String?   @db.Uuid
+  users_system_settings_created_byTousers users?    @relation("system_settings_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  users_system_settings_updated_byTousers users?    @relation("system_settings_updated_byTousers", fields: [updated_by], references: [id], onUpdate: NoAction)
+
+  @@unique([category, setting_key])
+}
+
+model url_categories {
+  id                                     String       @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                                   String       @db.VarChar(255)
+  description                            String?
+  color                                  String?      @db.VarChar(7)
+  is_default                             Boolean?     @default(false)
+  user_id                                String?      @db.Uuid
+  created_at                             DateTime?    @default(now()) @db.Timestamptz(6)
+  updated_at                             DateTime?    @default(now()) @db.Timestamptz(6)
+  created_by                             String?      @db.Uuid
+  updated_by                             String?      @db.Uuid
+  short_urls                             short_urls[]
+  users_url_categories_created_byTousers users?       @relation("url_categories_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_url_categories_updated_byTousers users?       @relation("url_categories_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  users_url_categories_user_idTousers    users?       @relation("url_categories_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model url_click_analytics {
+  id                                          String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  click_event_id                              Int?
+  short_url_id                                String?       @db.Uuid
+  clicked_at                                  DateTime?     @db.Timestamptz(6)
+  ip_address                                  String?       @db.Inet
+  user_agent                                  String?
+  country                                     String?       @db.VarChar(100)
+  city                                        String?       @db.VarChar(100)
+  region                                      String?       @db.VarChar(100)
+  timezone                                    String?       @db.VarChar(50)
+  latitude                                    Decimal?      @db.Decimal(10, 8)
+  longitude                                   Decimal?      @db.Decimal(11, 8)
+  isp                                         String?       @db.VarChar(255)
+  device_type                                 String?       @db.VarChar(50)
+  device_brand                                String?       @db.VarChar(100)
+  device_model                                String?       @db.VarChar(100)
+  operating_system                            String?       @db.VarChar(100)
+  browser                                     String?       @db.VarChar(100)
+  browser_version                             String?       @db.VarChar(50)
+  screen_resolution                           String?       @db.VarChar(50)
+  viewport_size                               String?       @db.VarChar(50)
+  color_depth                                 Int?
+  language                                    String?       @db.VarChar(10)
+  languages                                   String[]
+  time_zone                                   String?       @db.VarChar(50)
+  session_id                                  String?       @db.VarChar(255)
+  referrer                                    String?
+  utm_source                                  String?       @db.VarChar(100)
+  utm_medium                                  String?       @db.VarChar(100)
+  utm_campaign                                String?       @db.VarChar(100)
+  utm_term                                    String?       @db.VarChar(100)
+  utm_content                                 String?       @db.VarChar(100)
+  is_bot                                      Boolean?      @default(false)
+  is_mobile                                   Boolean?      @default(false)
+  is_first_visit                              Boolean?      @default(false)
+  visit_duration                              Int?
+  connection_type                             String?       @db.VarChar(50)
+  page_load_time                              Int?
+  created_by                                  String?       @db.Uuid
+  updated_by                                  String?       @db.Uuid
+  created_at                                  DateTime?     @default(now()) @db.Timestamptz(6)
+  updated_at                                  DateTime?     @default(now()) @db.Timestamptz(6)
+  click_events                                click_events? @relation(fields: [click_event_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_url_click_analytics_created_byTousers users?        @relation("url_click_analytics_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  short_urls                                  short_urls?   @relation(fields: [short_url_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users_url_click_analytics_updated_byTousers users?        @relation("url_click_analytics_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([click_event_id], map: "idx_url_click_analytics_click_event_id")
+  @@index([clicked_at], map: "idx_url_click_analytics_clicked_at")
+  @@index([country], map: "idx_url_click_analytics_country")
+  @@index([device_type], map: "idx_url_click_analytics_device_type")
+  @@index([short_url_id], map: "idx_url_click_analytics_short_url_id")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model user_activity {
+  id                                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id                               String         @db.Uuid
+  activity_type_id                      String         @db.Uuid
+  action                                String         @db.VarChar(100)
+  target_type                           String?        @db.VarChar(100)
+  target_id                             String?        @db.Uuid
+  target_name                           String?        @db.VarChar(255)
+  description                           String?
+  ip_address                            String?        @db.Inet
+  user_agent                            String?
+  status                                String?        @default("completed") @db.VarChar(50)
+  metadata                              Json?          @default("{}")
+  session_id                            String?        @db.VarChar(255)
+  duration_ms                           Int?
+  request_id                            String?        @db.VarChar(255)
+  referer                               String?
+  location                              Json?
+  device_info                           Json?
+  created_at                            DateTime?      @default(now()) @db.Timestamptz(6)
+  updated_at                            DateTime?      @default(now()) @db.Timestamptz(6)
+  created_by                            String?        @db.Uuid
+  updated_by                            String?        @db.Uuid
+  activity_types                        activity_types @relation(fields: [activity_type_id], references: [id], onUpdate: NoAction, map: "fk_user_activity_activity_type_id")
+  users_user_activity_user_idTousers    users          @relation("user_activity_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_activity_user_id")
+  users_user_activity_created_byTousers users?         @relation("user_activity_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction)
+  users_user_activity_updated_byTousers users?         @relation("user_activity_updated_byTousers", fields: [updated_by], references: [id], onUpdate: NoAction)
+
+  @@index([action], map: "idx_user_activity_action")
+  @@index([action, created_at(sort: Desc)], map: "idx_user_activity_action_created")
+  @@index([activity_type_id], map: "idx_user_activity_activity_type_id")
+  @@index([created_at(sort: Desc)], map: "idx_user_activity_created_at")
+  @@index([ip_address], map: "idx_user_activity_ip_address")
+  @@index([session_id], map: "idx_user_activity_session_id")
+  @@index([status], map: "idx_user_activity_status")
+  @@index([target_type], map: "idx_user_activity_target_type")
+  @@index([user_id, action], map: "idx_user_activity_user_action")
+  @@index([user_id, created_at(sort: Desc)], map: "idx_user_activity_user_created")
+  @@index([user_id], map: "idx_user_activity_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model user_settings {
+  id                                    Int       @id @default(autoincrement())
+  user_id                               String    @unique(map: "uq_user_settings_user") @db.Uuid
+  site_name                             String?   @db.VarChar(255)
+  site_description                      String?   @db.VarChar(512)
+  contact_email                         String?   @db.VarChar(255)
+  timezone                              String?   @db.VarChar(100)
+  language                              String?   @db.VarChar(10)
+  default_qr_size                       Int?      @default(300)
+  max_qr_size                           Int?      @default(1000)
+  default_format                        String?   @db.VarChar(20)
+  enable_branding                       Boolean?  @default(false)
+  enable_two_factor                     Boolean?  @default(false)
+  password_strength                     String?   @db.VarChar(20)
+  session_timeout                       Int?      @default(60)
+  api_rate_limit                        Int?      @default(1000)
+  enable_analytics                      Boolean?  @default(true)
+  geo_location                          Boolean?  @default(true)
+  data_retention_days                   Int?      @default(365)
+  anonymize_ip_addresses                Boolean?  @default(false)
+  email_notifications                   Boolean?  @default(true)
+  sms_notifications                     Boolean?  @default(false)
+  scan_alerts                           Boolean?  @default(true)
+  google_analytics_enabled              Boolean?  @default(false)
+  google_analytics_id                   String?   @db.VarChar(100)
+  custom_settings                       Json?
+  created_at                            DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at                            DateTime? @default(now()) @db.Timestamptz(6)
+  created_by                            String?   @db.Uuid
+  updated_by                            String?   @db.Uuid
+  users_user_settings_created_byTousers users?    @relation("user_settings_created_byTousers", fields: [created_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_user_settings_created_by")
+  users_user_settings_updated_byTousers users?    @relation("user_settings_updated_byTousers", fields: [updated_by], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_user_settings_updated_by")
+  users_user_settings_user_idTousers    users     @relation("user_settings_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_user_settings_user")
+
+  @@index([user_id], map: "idx_user_settings_user_id")
+}
+
+model users {
+  id                                                                String                    @id @default(dbgenerated("uuid_generate_v4()")) @db.Uuid
+  name                                                              String                    @db.VarChar(255)
+  email                                                             String                    @unique @db.VarChar(255)
+  password_hash                                                     String                    @db.VarChar(255)
+  avatar                                                            String?
+  is_active                                                         Boolean?                  @default(true)
+  group_id                                                          Int?
+  last_login                                                        DateTime?                 @db.Timestamptz(6)
+  created_at                                                        DateTime?                 @default(now()) @db.Timestamptz(6)
+  updated_at                                                        DateTime?                 @default(now()) @db.Timestamptz(6)
+  email_verified                                                    DateTime?                 @db.Timestamptz(6)
+  role_id                                                           String?                   @db.Uuid
+  accounts                                                          Account[]
+  activity_types_activity_types_created_byTousers                   activity_types[]          @relation("activity_types_created_byTousers")
+  activity_types_activity_types_updated_byTousers                   activity_types[]          @relation("activity_types_updated_byTousers")
+  click_events_click_events_created_byTousers                       click_events[]            @relation("click_events_created_byTousers")
+  click_events_click_events_updated_byTousers                       click_events[]            @relation("click_events_updated_byTousers")
+  click_events_click_events_user_idTousers                          click_events[]            @relation("click_events_user_idTousers")
+  groups_groups_created_byTousers                                   groups[]                  @relation("groups_created_byTousers")
+  groups_groups_updated_byTousers                                   groups[]                  @relation("groups_updated_byTousers")
+  menu_items_menu_items_created_byTousers                           menu_items[]              @relation("menu_items_created_byTousers")
+  menu_items_menu_items_updated_byTousers                           menu_items[]              @relation("menu_items_updated_byTousers")
+  menu_permissions_menu_permissions_created_byTousers               menu_permissions[]        @relation("menu_permissions_created_byTousers")
+  menu_permissions_menu_permissions_updated_byTousers               menu_permissions[]        @relation("menu_permissions_updated_byTousers")
+  menu_role_permissions_menu_role_permissions_created_byTousers     menu_role_permissions[]   @relation("menu_role_permissions_created_byTousers")
+  menu_role_permissions_menu_role_permissions_updated_byTousers     menu_role_permissions[]   @relation("menu_role_permissions_updated_byTousers")
+  notification_recipients_notification_recipients_created_byTousers notification_recipients[] @relation("notification_recipients_created_byTousers")
+  notification_recipients_notification_recipients_updated_byTousers notification_recipients[] @relation("notification_recipients_updated_byTousers")
+  notification_recipients_notification_recipients_user_idTousers    notification_recipients[] @relation("notification_recipients_user_idTousers")
+  notification_types_notification_types_created_byTousers           notification_types[]      @relation("notification_types_created_byTousers")
+  notification_types_notification_types_updated_byTousers           notification_types[]      @relation("notification_types_updated_byTousers")
+  notifications_notifications_created_byTousers                     notifications[]           @relation("notifications_created_byTousers")
+  notifications_notifications_updated_byTousers                     notifications[]           @relation("notifications_updated_byTousers")
+  qr_categories_qr_categories_created_byTousers                     qr_categories[]           @relation("qr_categories_created_byTousers")
+  qr_categories_qr_categories_updated_byTousers                     qr_categories[]           @relation("qr_categories_updated_byTousers")
+  qr_categories_qr_categories_user_idTousers                        qr_categories[]           @relation("qr_categories_user_idTousers")
+  qr_codes_qr_codes_created_byTousers                               qr_codes[]                @relation("qr_codes_created_byTousers")
+  qr_codes_qr_codes_updated_byTousers                               qr_codes[]                @relation("qr_codes_updated_byTousers")
+  qr_codes_qr_codes_user_idTousers                                  qr_codes[]                @relation("qr_codes_user_idTousers")
+  qr_migration                                                      qr_migration[]
+  qr_scan_analytics_qr_scan_analytics_created_byTousers             qr_scan_analytics[]       @relation("qr_scan_analytics_created_byTousers")
+  qr_scan_analytics_qr_scan_analytics_updated_byTousers             qr_scan_analytics[]       @relation("qr_scan_analytics_updated_byTousers")
+  qr_scan_analytics_qr_scan_analytics_user_idTousers                qr_scan_analytics[]       @relation("qr_scan_analytics_user_idTousers")
+  role_permissions_role_permissions_created_byTousers               role_permissions[]        @relation("role_permissions_created_byTousers")
+  role_permissions_role_permissions_updated_byTousers               role_permissions[]        @relation("role_permissions_updated_byTousers")
+  scan_events_scan_events_created_byTousers                         scan_events[]             @relation("scan_events_created_byTousers")
+  scan_events_scan_events_updated_byTousers                         scan_events[]             @relation("scan_events_updated_byTousers")
+  scan_events_scan_events_user_idTousers                            scan_events[]             @relation("scan_events_user_idTousers")
+  sessions                                                          Session[]
+  short_urls_short_urls_created_byTousers                           short_urls[]              @relation("short_urls_created_byTousers")
+  short_urls_short_urls_updated_byTousers                           short_urls[]              @relation("short_urls_updated_byTousers")
+  short_urls_short_urls_user_idTousers                              short_urls[]              @relation("short_urls_user_idTousers")
+  system_settings_system_settings_created_byTousers                 system_settings[]         @relation("system_settings_created_byTousers")
+  system_settings_system_settings_updated_byTousers                 system_settings[]         @relation("system_settings_updated_byTousers")
+  url_categories_url_categories_created_byTousers                   url_categories[]          @relation("url_categories_created_byTousers")
+  url_categories_url_categories_updated_byTousers                   url_categories[]          @relation("url_categories_updated_byTousers")
+  url_categories_url_categories_user_idTousers                      url_categories[]          @relation("url_categories_user_idTousers")
+  url_click_analytics_url_click_analytics_created_byTousers         url_click_analytics[]     @relation("url_click_analytics_created_byTousers")
+  url_click_analytics_url_click_analytics_updated_byTousers         url_click_analytics[]     @relation("url_click_analytics_updated_byTousers")
+  user_activity_user_activity_user_idTousers                        user_activity[]           @relation("user_activity_user_idTousers")
+  user_activity_user_activity_created_byTousers                     user_activity[]           @relation("user_activity_created_byTousers")
+  user_activity_user_activity_updated_byTousers                     user_activity[]           @relation("user_activity_updated_byTousers")
+  user_settings_user_settings_created_byTousers                     user_settings[]           @relation("user_settings_created_byTousers")
+  user_settings_user_settings_updated_byTousers                     user_settings[]           @relation("user_settings_updated_byTousers")
+  user_settings_user_settings_user_idTousers                        user_settings?            @relation("user_settings_user_idTousers")
+  groups_users_group_idTogroups                                     groups?                   @relation("users_group_idTogroups", fields: [group_id], references: [id], onUpdate: NoAction)
+  roles                                                             roles?                    @relation(fields: [role_id], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([email], map: "idx_users_email")
+  @@index([is_active], map: "idx_users_is_active")
+}
+
+/// The underlying table does not contain a valid unique identifier and can therefore currently not be handled by Prisma Client.
+model user_settings_backup_before_refactor {
+  id            Int?
+  user_id       String?   @db.Uuid
+  setting_key   String?   @db.VarChar(200)
+  setting_value Json?
+  data_type     String?   @db.VarChar(50)
+  is_active     Boolean?
+  created_at    DateTime? @db.Timestamptz(6)
+  updated_at    DateTime? @db.Timestamptz(6)
+  category      String?   @db.VarChar(50)
+  is_encrypted  Boolean?
+  created_by    String?   @db.Uuid
+  updated_by    String?   @db.Uuid
+
+  @@ignore
+}

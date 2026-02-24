@@ -1,0 +1,86 @@
+import { NextResponse } from 'next/server'
+import { getToken } from 'next-auth/jwt'
+import type { NextRequest } from 'next/server'
+
+// Constants for URL paths
+const PUBLIC_PATHS = ['/login', '/register', '/api/auth']
+const STATIC_PATHS = ['/_next', '/favicon.ico', '/public']
+const API_PATHS = ['/api']
+
+// Config for path matching
+export const config = {
+  matcher: [
+    // Match all paths except static files
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+    // Match API routes
+    '/api/:path*'
+  ]
+}
+
+export async function middleware(request: NextRequest) {
+  try {
+    const token = await getToken({
+      req: request,
+      secret: process.env.NEXTAUTH_SECRET
+    })
+
+    // Check if path is public or static
+    const isPublicPath = PUBLIC_PATHS.some((path) => request.nextUrl.pathname.startsWith(path))
+    const isStaticPath = STATIC_PATHS.some((path) => request.nextUrl.pathname.startsWith(path))
+    const isApiPath = API_PATHS.some((path) => request.nextUrl.pathname.startsWith(path))
+
+    // Allow static assets through
+    if (isStaticPath) {
+    return NextResponse.next()
+  } catch (error) {
+    console.error('Middleware error:', error)
+    return NextResponse.redirect(new URL('/error', request.url))
+  }
+}
+
+// Config for path matching
+export const config = {
+  matcher: [
+    // Match all paths except static files
+    '/((?!_next/static|_next/image|favicon.ico).*)',
+    // Match API routes
+    '/api/:path*'
+  ]
+}    // Redirect authenticated users away from auth pages
+    if (token && (request.nextUrl.pathname === '/login' || request.nextUrl.pathname === '/register')) {
+      return NextResponse.redirect(new URL('/dashboard', request.url))
+    }
+
+    // Handle API routes
+    if (isApiPath && !isPublicPath) {
+      if (!token) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+      // Add token information to request headers
+      const requestHeaders = new Headers(request.headers)
+      requestHeaders.set('x-user-id', token.id as string)
+      requestHeaders.set('x-user-role', token.role as string)
+      
+      return NextResponse.next({
+        headers: requestHeaders
+      })
+    }
+
+    // Redirect unauthenticated users to login for protected routes
+    if (!token && !isPublicPath) {
+      const loginUrl = new URL('/login', request.url)
+      loginUrl.searchParams.set('callbackUrl', request.url)
+      return NextResponse.redirect(loginUrl)
+    }
+
+    return NextResponse.next()
+  } catch (error) {
+    console.error('Middleware error:', error)
+    return NextResponse.redirect(new URL('/error', request.url))
+  }
+}
+}
+
+export const config = {
+  matcher: '/((?!_next/static|_next/image|favicon.ico).*)'
+}

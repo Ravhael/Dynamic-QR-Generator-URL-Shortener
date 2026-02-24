@@ -1,0 +1,171 @@
+import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { getToken } from "next-auth/jwt";
+import { PrismaClient } from '@prisma/client';
+
+// Singleton pattern untuk PrismaClient
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+const prisma = globalForPrisma.prisma || new PrismaClient();
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+// Prevent response caching
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+interface ActivityStats {
+  totalActivities: number;
+  totalUsers: number;
+  activeGroups: number;
+  timestamp: string;
+}
+
+export async function GET(request: NextRequest) {
+  try {
+    // Auth check with more robust token validation
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token || typeof token !== 'object') {
+      console.warn('[ACTIVITY STATS API] Invalid token format');
+      return NextResponse.json({ 
+        success: false,
+        message: 'Not authenticated',
+        error: 'Invalid authentication token'
+      }, { 
+        status: 401,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    if (!token.role || !['admin', 'manager'].includes(token.role)) {
+      console.warn('[ACTIVITY STATS API] Unauthorized access attempt:', token.role);
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized',
+        error: 'Insufficient permissions'
+      }, { 
+        status: 403,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    // More efficient queries with proper typing and error handling
+    const stats: ActivityStats = {
+      totalActivities: 0,
+      totalUsers: 0,
+      activeGroups: 0,
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      // Get total activities
+      stats.totalActivities = await prisma.user_activity.count({
+        where: {
+          deleted_at: null,
+          activity_type: { 
+            is_active: true 
+          }
+        }
+      });
+    } catch (err) {
+      console.error('[ACTIVITY STATS API] Error counting activities:', err);
+      stats.totalActivities = 0;
+    }
+
+    try {
+      // Get unique active users more efficiently
+      const activeUsersResult = await prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(DISTINCT user_id) as count 
+        FROM user_activity 
+        WHERE deleted_at IS NULL
+        AND activity_type_id IN (
+          SELECT id FROM activity_types WHERE is_active = true
+        )
+      `;
+      stats.totalUsers = Number(activeUsersResult[0]?.count || 0);
+    } catch (err) {
+      console.error('[ACTIVITY STATS API] Error counting users:', err);
+      stats.totalUsers = 0;
+    }
+
+    try {
+      // Get active groups with proper join conditions
+      const activeGroupsResult = await prisma.$queryRaw<[{ count: bigint }]>`
+        SELECT COUNT(DISTINCT g.id) as count
+        FROM groups g
+        INNER JOIN users u ON u.group_id = g.id
+        INNER JOIN user_activity ua ON ua.user_id = u.id
+        WHERE g.deleted_at IS NULL 
+        AND u.deleted_at IS NULL 
+        AND ua.deleted_at IS NULL
+        AND ua.activity_type_id IN (
+          SELECT id FROM activity_types WHERE is_active = true
+        )
+      `;
+      stats.activeGroups = Number(activeGroupsResult[0]?.count || 0);
+    } catch (err) {
+      console.error('[ACTIVITY STATS API] Error counting groups:', err);
+      stats.activeGroups = 0;
+    }
+
+    console.log('[ACTIVITY STATS API] Successfully fetched stats:', {
+      ...stats,
+      query_timestamp: new Date().toISOString()
+    });
+
+    // Return response with proper headers and types
+    return NextResponse.json({
+      success: true,
+      data: stats,
+      message: 'Activity statistics retrieved successfully'
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Content-Type': 'application/json'
+      }
+    });
+
+  } catch (error: unknown) {
+    // Detailed error logging with proper typing
+    const errorDetails = {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : 'Unknown error occurred',
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString()
+    };
+
+    console.error('[ACTIVITY STATS API] Error details:', errorDetails);
+
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to fetch activity statistics',
+      error: errorDetails.message
+    }, { 
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Content-Type': 'application/json'
+      }
+    });
+  } finally {
+    // Only disconnect in development to prevent connection churn in production
+    if (process.env.NODE_ENV !== 'production') {
+      try {
+        await prisma.$disconnect();
+      } catch (disconnectError) {
+        console.error('[ACTIVITY STATS API] Error disconnecting from database:', disconnectError);
+      }
+    }
+  }
+}

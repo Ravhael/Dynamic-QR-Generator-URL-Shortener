@@ -1,0 +1,134 @@
+import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { getToken } from "next-auth/jwt";
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+// Prevent response caching
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+export async function GET(request: NextRequest) {
+  try {
+    // Auth check with more robust token validation
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token || typeof token !== 'object') {
+      console.warn('[ACTIVITY STATS API] Invalid token format');
+      return NextResponse.json({ 
+        success: false,
+        message: 'Not authenticated',
+        error: 'Invalid authentication token'
+      }, { 
+        status: 401,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    if (!token.role || !['admin', 'manager'].includes(token.role)) {
+      console.warn('[ACTIVITY STATS API] Unauthorized access attempt:', token.role);
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized',
+        error: 'Insufficient permissions'
+      }, { 
+        status: 403,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    // More efficient queries with proper typing
+    const [totalActivities, uniqueUsers, activeGroups] = await Promise.all([
+      // Get total activities with type safety
+      prisma.user_activity.count({
+        where: {
+          NOT: {
+            activity_type: null
+          }
+        }
+      }),
+      
+      // Get unique active users count more efficiently
+      prisma.$queryRaw<{ count: number }[]>`
+        SELECT COUNT(DISTINCT user_id) as count 
+        FROM user_activity 
+        WHERE deleted_at IS NULL
+      `.then(result => Number(result[0]?.count || 0)),
+      
+      // Get active groups with better performance
+      prisma.$queryRaw<{ count: number }[]>`
+        SELECT COUNT(DISTINCT g.id) as count
+        FROM groups g
+        INNER JOIN users u ON u.group_id = g.id
+        INNER JOIN user_activity ua ON ua.user_id = u.id
+        WHERE g.deleted_at IS NULL 
+        AND u.deleted_at IS NULL 
+        AND ua.deleted_at IS NULL
+      `.then(result => Number(result[0]?.count || 0))
+    ]);
+
+    console.log('[ACTIVITY STATS API] Successfully fetched stats:', {
+      totalActivities,
+      uniqueUsers,
+      activeGroups,
+      timestamp: new Date().toISOString()
+    });
+
+    // Return response with proper headers
+    return NextResponse.json({
+      success: true,
+      data: {
+        totalActivities,
+        totalUsers: uniqueUsers,
+        activeGroups,
+        timestamp: new Date().toISOString()
+      },
+      message: 'Activity statistics retrieved successfully'
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
+
+  } catch (error: unknown) {
+    // More detailed error logging
+    console.error('[ACTIVITY STATS API] Error details:', {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : 'Unknown error occurred',
+      stack: error instanceof Error ? error.stack : undefined,
+      timestamp: new Date().toISOString()
+    });
+
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to fetch activity statistics',
+      error: error instanceof Error 
+        ? `${error.name}: ${error.message}`
+        : 'An unexpected error occurred'
+    }, { 
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache'
+      }
+    });
+  } finally {
+    try {
+      await prisma.$disconnect();
+    } catch (disconnectError) {
+      console.error('[ACTIVITY STATS API] Error disconnecting from database:', disconnectError);
+    }
+  }
+}

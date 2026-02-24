@@ -1,0 +1,125 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getToken } from "next-auth/jwt";
+import { PrismaClient } from '@prisma/client';
+
+// Singleton pattern for PrismaClient
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+const prisma = globalForPrisma.prisma || new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+export async function POST(request: NextRequest) {
+  try {
+    // Auth check
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token?.role) {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Authentication required'
+      }, { status: 401 });
+    }
+
+    // Only admin can update system constraints
+    if (token.role.toLowerCase() !== 'admin') {
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized - Admin access required'
+      }, { status: 403 });
+    }
+
+    console.warn('[UPDATE CONSTRAINT] Starting database constraint update...');
+    
+    // Using Prisma's executeRaw for raw SQL operations that Prisma doesn't support directly
+    // Drop existing constraint
+    await prisma.$executeRaw`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check`;
+    console.warn('[UPDATE CONSTRAINT] Dropped old constraint');
+    
+    // Add new constraint that includes all roles
+    await prisma.$executeRaw`
+      ALTER TABLE users ADD CONSTRAINT users_role_check 
+      CHECK (role IN ('admin', 'editor', 'viewer', 'user'))
+    `;
+    console.warn('[UPDATE CONSTRAINT] Added new constraint with user role');
+    
+    // Update default role to 'user'
+    await prisma.$executeRaw`ALTER TABLE users ALTER COLUMN role SET DEFAULT 'user'`;
+    console.warn('[UPDATE CONSTRAINT] Updated default role to user');
+
+    // Log the operation in activity_logs if the table exists
+    try {
+      await prisma.activity_logs.create({
+        data: {
+          user_id: token.sub!, // User ID from token
+          action: 'UPDATE_CONSTRAINT',
+          description: 'Updated users table role constraint and default value',
+          ip_address: request.ip || 'unknown',
+          user_agent: request.headers.get('user-agent') || 'unknown',
+          status: 'success'
+        }
+      });
+    } catch (logError) {
+      console.warn('[UPDATE CONSTRAINT] Failed to log activity:', logError);
+      // Don't fail the main operation if logging fails
+    }
+    
+    return NextResponse.json({
+      success: true,
+      message: 'Database constraint updated successfully',
+      details: {
+        constraint: 'users_role_check now includes: admin, editor, viewer, user',
+        default_role: 'user'
+      },
+      metadata: {
+        timestamp: new Date().toISOString(),
+        user: token.email
+      }
+    });
+    
+  } catch (error: unknown) {
+    console.error('[UPDATE CONSTRAINT] Error:', error);
+
+    // Try to log the failure
+    try {
+      const token = await getToken({ req: request as any });
+      await prisma.activity_logs.create({
+        data: {
+          user_id: token?.sub || 'system',
+          action: 'UPDATE_CONSTRAINT',
+          description: `Failed to update constraint: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          ip_address: request.ip || 'unknown',
+          user_agent: request.headers.get('user-agent') || 'unknown',
+          status: 'error',
+          error_details: error instanceof Error ? error.stack : undefined
+        }
+      });
+    } catch (logError) {
+      console.error('[UPDATE CONSTRAINT] Failed to log error:', logError);
+    }
+
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to update database constraint',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { 
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': 'application/json'
+      }
+    });
+  } finally {
+    // Only disconnect in development
+    if (process.env.NODE_ENV !== 'production') {
+      await prisma.$disconnect().catch(console.error);
+    }
+  }
+}

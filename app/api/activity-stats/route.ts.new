@@ -1,0 +1,251 @@
+import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { getToken } from "next-auth/jwt";
+import { PrismaClient } from '@prisma/client';
+import { db } from '@/lib/db';  // Fallback to direct connection
+
+// Singleton pattern untuk PrismaClient
+const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
+const prisma = globalForPrisma.prisma || new PrismaClient({
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
+});
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+// Prevent response caching
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+interface ActivityStats {
+  totalActivities: number;
+  totalUsers: number;
+  activeGroups: number;
+  activityBreakdown: {
+    [key: string]: number;
+  };
+  timestamp: string;
+}
+
+export async function GET(request: NextRequest) {
+  const startTime = Date.now();
+  
+  try {
+    // Auth check with more robust token validation
+    const token = await getToken({ 
+      req: request as any,
+      secret: process.env.NEXTAUTH_SECRET 
+    });
+
+    if (!token?.role) {
+      console.warn('[ACTIVITY STATS API] Auth failed:', { 
+        token: token ? 'exists' : 'missing',
+        role: token?.role 
+      });
+      
+      return NextResponse.json({ 
+        success: false,
+        message: 'Authentication required',
+        error: token ? 'Insufficient permissions' : 'No authentication token'
+      }, { 
+        status: token ? 403 : 401,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    // Check role permissions
+    const hasAccess = await prisma.roles.findFirst({
+      where: {
+        id: token.role as string,
+        OR: [
+          { name: 'admin' },
+          { name: 'manager' }
+        ]
+      }
+    });
+
+    if (!hasAccess) {
+      console.warn('[ACTIVITY STATS API] Invalid role access attempt:', token.role);
+      return NextResponse.json({ 
+        success: false,
+        message: 'Unauthorized',
+        error: 'Insufficient permissions'
+      }, { 
+        status: 403,
+        headers: {
+          'Cache-Control': 'no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
+    }
+
+    const stats: ActivityStats = {
+      totalActivities: 0,
+      totalUsers: 0,
+      activeGroups: 0,
+      activityBreakdown: {},
+      timestamp: new Date().toISOString()
+    };
+
+    try {
+      // Check if the activity_types table exists and has data
+      const activityTypesExist = await db.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'activity_types'
+        );
+      `);
+
+      if (!activityTypesExist.rows[0].exists) {
+        throw new Error('Activity types table does not exist');
+      }
+
+      // Use raw SQL queries with explicit checks and better JOIN conditions
+      const [
+        totalActivitiesResult,
+        uniqueUsersResult,
+        activeGroupsResult,
+        activityBreakdownResult
+      ] = await Promise.allSettled([
+        // Get total activities - now with explicit JOIN conditions
+        db.query(`
+          SELECT COUNT(*) as count
+          FROM (
+            SELECT ua.id 
+            FROM user_activity ua
+            LEFT JOIN activity_types at ON ua.activity_type_id::uuid = at.id::uuid
+            WHERE (ua.deleted_at IS NULL OR ua.deleted_at > NOW())
+            AND (at.id IS NULL OR at.is_active = true)
+          ) as active_activities
+        `),
+
+        // Get unique active users count - with proper user check
+        db.query(`
+          SELECT COUNT(DISTINCT ua.user_id) as count
+          FROM user_activity ua
+          LEFT JOIN users u ON ua.user_id::uuid = u.id::uuid
+          LEFT JOIN activity_types at ON ua.activity_type_id::uuid = at.id::uuid
+          WHERE (ua.deleted_at IS NULL OR ua.deleted_at > NOW())
+          AND (at.id IS NULL OR at.is_active = true)
+          AND u.id IS NOT NULL
+          AND (u.deleted_at IS NULL OR u.deleted_at > NOW())
+        `),
+
+        // Get active groups count - with better JOIN sequence
+        db.query(`
+          SELECT COUNT(DISTINCT g.id) as count
+          FROM groups g
+          INNER JOIN users u ON u.group_id = g.id
+          INNER JOIN user_activity ua ON ua.user_id::uuid = u.id::uuid
+          LEFT JOIN activity_types at ON ua.activity_type_id::uuid = at.id::uuid
+          WHERE (ua.deleted_at IS NULL OR ua.deleted_at > NOW())
+          AND (at.id IS NULL OR at.is_active = true)
+          AND (u.deleted_at IS NULL OR u.deleted_at > NOW())
+        `),
+
+        // Get activity breakdown by type - with proper type check
+        db.query(`
+          SELECT COALESCE(at.name, 'Unknown') as type, COUNT(*) as count
+          FROM user_activity ua
+          LEFT JOIN activity_types at ON ua.activity_type_id::uuid = at.id::uuid
+          WHERE (ua.deleted_at IS NULL OR ua.deleted_at > NOW())
+          AND (at.id IS NULL OR at.is_active = true)
+          GROUP BY at.name
+          ORDER BY count DESC
+        `)
+      ]);
+
+      // Process results with error handling
+      if (totalActivitiesResult.status === 'fulfilled') {
+        stats.totalActivities = parseInt(totalActivitiesResult.value.rows[0]?.count || '0');
+      } else {
+        console.error('Failed to get total activities:', totalActivitiesResult.reason);
+      }
+
+      if (uniqueUsersResult.status === 'fulfilled') {
+        stats.totalUsers = parseInt(uniqueUsersResult.value.rows[0]?.count || '0');
+      } else {
+        console.error('Failed to get unique users:', uniqueUsersResult.reason);
+      }
+
+      if (activeGroupsResult.status === 'fulfilled') {
+        stats.activeGroups = parseInt(activeGroupsResult.value.rows[0]?.count || '0');
+      } else {
+        console.error('Failed to get active groups:', activeGroupsResult.reason);
+      }
+
+      if (activityBreakdownResult.status === 'fulfilled') {
+        stats.activityBreakdown = activityBreakdownResult.value.rows.reduce((acc: any, curr: any) => {
+          acc[curr.type || 'Unknown'] = parseInt(curr.count);
+          return acc;
+        }, {});
+      } else {
+        console.error('Failed to get activity breakdown:', activityBreakdownResult.reason);
+      }
+
+    } catch (dbError) {
+      console.error('[ACTIVITY STATS API] Database error:', dbError);
+      throw new Error('Database query failed: ' + (dbError instanceof Error ? dbError.message : 'Unknown error'));
+    }
+
+    const endTime = Date.now();
+    console.log('[ACTIVITY STATS API] Stats retrieved successfully:', {
+      ...stats,
+      execution_time_ms: endTime - startTime,
+      query_timestamp: new Date().toISOString()
+    });
+
+    return NextResponse.json({
+      success: true,
+      data: stats,
+      metadata: {
+        execution_time_ms: endTime - startTime,
+        query_timestamp: new Date().toISOString()
+      },
+      message: 'Activity statistics retrieved successfully'
+    }, {
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Content-Type': 'application/json'
+      }
+    });
+
+  } catch (error: unknown) {
+    const endTime = Date.now();
+    const errorDetails = {
+      name: error instanceof Error ? error.name : 'Unknown',
+      message: error instanceof Error ? error.message : 'Unknown error occurred',
+      stack: error instanceof Error ? error.stack : undefined,
+      execution_time_ms: endTime - startTime,
+      timestamp: new Date().toISOString()
+    };
+
+    console.error('[ACTIVITY STATS API] Error details:', errorDetails);
+
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to fetch activity statistics',
+      error: errorDetails.message,
+      metadata: {
+        execution_time_ms: endTime - startTime,
+        error_timestamp: new Date().toISOString()
+      }
+    }, { 
+      status: 500,
+      headers: {
+        'Cache-Control': 'no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Content-Type': 'application/json'
+      }
+    });
+  } finally {
+    // Only disconnect in development to prevent connection churn in production
+    if (process.env.NODE_ENV !== 'production') {
+      await prisma.$disconnect().catch(console.error);
+    }
+  }
+}

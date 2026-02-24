@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Clear Auth & Test Login</title>
+</head>
+<body>
+    <h1>🔐 Scanly Auth Debug Tool</h1>
+    
+    <h2>Current Auth State:</h2>
+    <div id="auth-info">
+        <p><strong>localStorage scanly_user:</strong> <span id="user-data">-</span></p>
+        <p><strong>localStorage scanly_token:</strong> <span id="token-data">-</span></p>
+        <p><strong>Cookie scanly_auth:</strong> <span id="cookie-data">-</span></p>
+    </div>
+    
+    <h2>Actions:</h2>
+    <button onclick="clearAll()" style="background: red; color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 5px;">
+        🗑️ CLEAR ALL AUTH DATA
+    </button>
+    
+    <button onclick="checkAuth()" style="background: blue; color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 5px;">
+        🔍 CHECK AUTH STATE
+    </button>
+    
+    <button onclick="goToLogin()" style="background: green; color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 5px;">
+        ➡️ GO TO LOGIN
+    </button>
+    
+    <button onclick="goToRoot()" style="background: orange; color: white; padding: 10px 20px; border: none; border-radius: 5px; margin: 5px;">
+        🏠 GO TO ROOT
+    </button>
+    
+    <h2>Instructions:</h2>
+    <ol>
+        <li>Click "CLEAR ALL AUTH DATA" to remove all login data</li>
+        <li>Click "GO TO ROOT" to test redirect logic</li>
+        <li>Should redirect to /login if auth is cleared</li>
+        <li>Login with: admin@scanly.indovisual.co.id / admin123</li>
+    </ol>
+    
+    <script>
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+            return null;
+        }
+        
+        function clearAll() {
+            console.log('🗑️ Clearing all auth data...');
+            
+            // Clear localStorage
+            localStorage.removeItem('scanly_user');
+            localStorage.removeItem('scanly_token');
+            
+            // Clear cookie
+            document.cookie = 'scanly_auth=; Max-Age=0; Path=/; SameSite=Lax';
+            
+            alert('✅ All auth data cleared!');
+            checkAuth();
+        }
+        
+        function checkAuth() {
+            const userData = localStorage.getItem('scanly_user');
+            const tokenData = localStorage.getItem('scanly_token');
+            const cookieData = getCookie('scanly_auth');
+            
+            document.getElementById('user-data').textContent = userData ? 'EXISTS' : 'NOT FOUND';
+            document.getElementById('token-data').textContent = tokenData ? 'EXISTS' : 'NOT FOUND';
+            document.getElementById('cookie-data').textContent = cookieData || 'NOT FOUND';
+            
+            console.log('Current auth state:', { userData, tokenData, cookieData });
+        }
+        
+        function goToLogin() {
+            window.location.href = '/login';
+        }
+        
+        function goToRoot() {
+            window.location.href = '/';
+        }
+        
+        // Check auth on page load
+        checkAuth();
+    </script>
+</body>
+</html>

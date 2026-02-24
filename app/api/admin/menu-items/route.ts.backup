@@ -1,0 +1,127 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { getToken } from "next-auth/jwt";
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const fetchCache = 'force-no-store';
+
+export async function GET(request: NextRequest) {
+  try {
+    // Auth check
+    const token = await getToken({ req: request as any });
+    if (!token) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+    if (!token.role || token.role !== 'admin') {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    console.warn('🔍 Querying menu_items from database...');
+    
+    const result = await query(`
+      WITH RECURSIVE menu_tree AS (
+        -- Base case: root menu items
+        SELECT 
+          mi.*,
+          1 as level,
+          mi.menu_id::text as path
+        FROM menu_items mi
+        WHERE mi.parent_id IS NULL
+        
+        UNION ALL
+        
+        -- Recursive case: child menu items
+        SELECT 
+          mi.*,
+          mt.level + 1,
+          mt.path || '/' || mi.menu_idgw bilang cek side
+        FROM menu_items mi
+        INNER JOIN menu_tree mt ON mi.parent_id = mt.menu_id
+      )
+      SELECT 
+        mt.*,
+        (
+          SELECT json_agg(json_build_object(
+            'id', mp.id,
+            'name', mp.name,
+            'description', mp.description,
+            'is_active', mp.is_active
+          ))
+          FROM menu_permissions mp
+          WHERE mp.menu_id = mt.menu_id
+        ) as permissions
+      FROM menu_tree mt
+      ORDER BY path, sort_order ASC
+    `);
+    
+    console.warn('✅ Successfully fetched menu items:', result.rows.length, 'records');
+
+    // Process menu items into hierarchical structure with proper ordering
+    const menuItems = result.rows.map(item => ({
+      ...item,
+      permissions: item.permissions || []
+    }));
+
+    // Build a map for quick lookups
+    const menuMap = new Map(menuItems.map(item => [item.menu_id, {
+      ...item,
+      children: []
+    }]));
+
+    // Build hierarchical structure
+    const hierarchicalMenus = [];
+    menuItems.forEach(item => {
+      const processedItem = menuMap.get(item.menu_id);
+      
+      if (item.parent_id) {
+        // This is a child item - add to parent's children array
+        const parent = menuMap.get(item.parent_id);
+        if (parent) {
+          parent.children.push(processedItem);
+          parent.children.sort((a, b) => a.sort_order - b.sort_order);
+        } else {
+          console.warn(`⚠️ Parent menu ${item.parent_id} not found for ${item.menu_id}`);
+          hierarchicalMenus.push(processedItem);
+        }
+      } else {
+        // This is a root item
+        hierarchicalMenus.push(processedItem);
+      }
+    });
+
+    // Sort root items by sort_order
+    hierarchicalMenus.sort((a, b) => a.sort_order - b.sort_order);
+
+    // Calculate statistics
+    const groupItems = menuItems.filter(item => item.is_group);
+    const regularItems = menuItems.filter(item => !item.is_group);
+    const totalPermissions = menuItems.reduce((sum, item) => 
+      sum + (item.permissions?.length || 0), 0);
+
+    return NextResponse.json({
+      success: true,
+      data: {
+        menus: hierarchicalMenus,
+        flat_menus: menuItems.sort((a, b) => a.sort_order - b.sort_order),
+        statistics: {
+          total_items: menuItems.length,
+          group_items: groupItems.length,
+          regular_items: regularItems.length,
+          total_permissions: totalPermissions
+        }
+      },
+      message: 'Menu items fetched successfully'
+    });
+    
+  } catch (_error) {
+    console.error('Error in GET /api/admin/menu-items:', _error);
+    return NextResponse.json({
+      success: false,
+      message: 'Internal server error',
+      _error: _error instanceof Error ? _error.message : 'Unknown error'
+    }, { status: 500 });
+  }
+}

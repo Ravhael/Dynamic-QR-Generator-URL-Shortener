@@ -1,0 +1,19 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Type Check",
+			"type": "shell",
+			"command": "npm run -s type-check"
+		},
+		{
+			"label": "Type Check (Isolated)",
+			"type": "shell",
+			"command": "npx tsc --noEmit -p tsconfig.typecheck.json",
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		}
+	]
+}

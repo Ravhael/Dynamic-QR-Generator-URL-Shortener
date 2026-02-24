@@ -1,0 +1,68 @@
+import { NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import { getToken } from "next-auth/jwt";
+import { PrismaClient } from '@prisma/client';
+
+const prisma = new PrismaClient();
+
+export async function GET(request: NextRequest) {
+  try {
+    // Auth check
+    const token = await getToken({ req: request as any });
+    if (!token) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+    if (!token.role || !['admin', 'manager'].includes(token.role)) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
+    }
+
+    // Get all required stats in parallel using Prisma
+    const [totalActivities, totalUsers, activeGroups] = await Promise.all([
+      // Get total activities
+      prisma.user_activity.count(),
+      
+      // Get total users with activity
+      prisma.user_activity.groupBy({
+        by: ['user_id']
+      }).then(groups => groups.length),
+      
+      // Get active groups count
+      prisma.groups.count({
+        where: {
+          users: {
+            some: {
+              user_activity: {
+                some: {}  // At least one activity
+              }
+            }
+          }
+        }
+      })
+    ]);
+
+    console.log('[ACTIVITY STATS API] Stats:', {
+      totalActivities,
+      totalUsers,
+      activeGroups
+    });
+
+    return NextResponse.json({
+      success: true,
+      stats: {
+        totalActivities,
+        totalUsers,
+        activeGroups
+      }
+    });
+
+  } catch (error: any) {
+    console.error('[ACTIVITY STATS API] Error:', error.message);
+    return NextResponse.json({
+      success: false,
+      message: 'Failed to fetch activity statistics',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    }, { status: 500 });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
